@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>智能桌宠 BLE 控制台</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101418;
+      --panel: #182027;
+      --panel-soft: #202a33;
+      --text: #eef5f7;
+      --muted: #9fb0ba;
+      --line: #33414d;
+      --accent: #41d39d;
+      --accent-strong: #25b884;
+      --warn: #ffcf5a;
+      --error: #ff7b7b;
+      --button: #263440;
+      --button-active: #2d7d66;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .app {
+      width: min(100%, 760px);
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    header {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 750;
+      letter-spacing: 0;
+    }
+
+    .status-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .status {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .status.connecting {
+      color: var(--warn);
+      border-color: rgba(255, 207, 90, 0.55);
+    }
+
+    .status.connected {
+      color: var(--accent);
+      border-color: rgba(65, 211, 157, 0.65);
+    }
+
+    .status.disconnected {
+      color: var(--error);
+      border-color: rgba(255, 123, 123, 0.6);
+    }
+
+    button {
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--button);
+      color: var(--text);
+      font: inherit;
+      font-weight: 700;
+      letter-spacing: 0;
+      touch-action: manipulation;
+    }
+
+    button:active {
+      background: var(--button-active);
+      transform: translateY(1px);
+    }
+
+    button.primary {
+      border-color: rgba(65, 211, 157, 0.65);
+      background: var(--accent-strong);
+      color: #06130e;
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      transform: none;
+    }
+
+    .grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 12px;
+    }
+
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 0.95rem;
+      font-weight: 750;
+      color: var(--muted);
+      letter-spacing: 0;
+    }
+
+    .buttons {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .buttons.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .state-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .state-item {
+      min-height: 52px;
+      border-radius: 8px;
+      background: var(--panel-soft);
+      padding: 8px 10px;
+    }
+
+    .state-label {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .state-value {
+      font-weight: 750;
+      overflow-wrap: anywhere;
+    }
+
+    .slider-row {
+      display: grid;
+      grid-template-columns: 1fr 52px;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    output {
+      min-height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      background: var(--panel-soft);
+      font-weight: 800;
+    }
+
+    .notice {
+      display: none;
+      margin-bottom: 12px;
+      border: 1px solid rgba(255, 207, 90, 0.5);
+      border-radius: 8px;
+      background: rgba(255, 207, 90, 0.11);
+      color: var(--warn);
+      padding: 10px;
+      line-height: 1.45;
+    }
+
+    .notice.visible {
+      display: block;
+    }
+
+    .log {
+      height: 220px;
+      overflow: auto;
+      border-radius: 8px;
+      background: #070b0e;
+      border: 1px solid var(--line);
+      padding: 10px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 0.88rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    @media (min-width: 680px) {
+      header {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .status-row {
+        min-width: 360px;
+      }
+
+      .grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .card.wide {
+        grid-column: 1 / -1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <h1>智能桌宠 BLE 控制台</h1>
+      <div class="status-row">
+        <div id="connectionStatus" class="status">未连接</div>
+        <button id="connectButton" class="primary" type="button">连接 SmartPet</button>
+      </div>
+    </header>
+
+    <div id="supportNotice" class="notice">
+      当前浏览器不支持 Web Bluetooth。请使用支持 Web Bluetooth 的浏览器，并通过安全上下文打开本页面。
+    </div>
+
+    <section class="grid">
+      <div class="card">
+        <h2>基础控制</h2>
+        <div class="buttons three">
+          <button data-command="touch" type="button">摸头</button>
+          <button data-command="feed" type="button">喂食</button>
+          <button data-command="state" type="button">刷新状态</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>动作控制</h2>
+        <div class="buttons">
+          <button data-command="setmot 0" type="button">无动作</button>
+          <button data-command="setmot 1" type="button">玩耍</button>
+          <button data-command="setmot 2" type="button">闲逛</button>
+          <button data-command="setmot 3" type="button">疲惫</button>
+          <button data-command="setmot 4" type="button">前进</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>状态控制</h2>
+        <div class="buttons">
+          <button data-command="setslp true" type="button">睡觉</button>
+          <button data-command="setslp false" type="button">唤醒</button>
+          <button data-command="setful true" type="button">吃饱</button>
+          <button data-command="setful false" type="button">饥饿</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>心情控制</h2>
+        <div class="slider-row">
+          <input id="emotionSlider" type="range" min="1" max="10" value="5">
+          <output id="emotionValue">5</output>
+        </div>
+        <button id="emotionButton" type="button">设置心情</button>
+      </div>
+
+      <div class="card wide">
+        <h2>当前状态</h2>
+        <div class="state-grid">
+          <div class="state-item">
+            <span class="state-label">电源</span>
+            <span id="statePower" class="state-value">--</span>
+          </div>
+          <div class="state-item">
+            <span class="state-label">心情</span>
+            <span id="stateEmotion" class="state-value">--</span>
+          </div>
+          <div class="state-item">
+            <span class="state-label">饱腹</span>
+            <span id="stateFood" class="state-value">--</span>
+          </div>
+          <div class="state-item">
+            <span class="state-label">动作</span>
+            <span id="stateMotion" class="state-value">--</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card wide">
+        <h2>日志</h2>
+        <div id="log" class="log"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+    const RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+    const TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+
+    let device = null;
+    let rxCharacteristic = null;
+    let txCharacteristic = null;
+
+    const statusEl = document.querySelector("#connectionStatus");
+    const connectButton = document.querySelector("#connectButton");
+    const supportNotice = document.querySelector("#supportNotice");
+    const logEl = document.querySelector("#log");
+    const commandButtons = Array.from(document.querySelectorAll("[data-command]"));
+    const emotionSlider = document.querySelector("#emotionSlider");
+    const emotionValue = document.querySelector("#emotionValue");
+    const emotionButton = document.querySelector("#emotionButton");
+
+    const stateFields = {
+      power: document.querySelector("#statePower"),
+      emotion: document.querySelector("#stateEmotion"),
+      food: document.querySelector("#stateFood"),
+      motion: document.querySelector("#stateMotion"),
+    };
+
+    function setStatus(text, state) {
+      statusEl.textContent = text;
+      statusEl.className = `status ${state || ""}`.trim();
+    }
+
+    function setControlsEnabled(enabled) {
+      commandButtons.forEach((button) => {
+        button.disabled = !enabled;
+      });
+      emotionButton.disabled = !enabled;
+    }
+
+    function appendLog(text) {
+      const time = new Date().toLocaleTimeString();
+      logEl.textContent += `[${time}] ${text}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function parseStateLine(line) {
+      if (!line.startsWith("S,")) {
+        return;
+      }
+
+      const parts = line.trim().split(",");
+      if (parts.length < 6) {
+        return;
+      }
+
+      stateFields.power.textContent = parts[1];
+      stateFields.emotion.textContent = parts[2];
+      stateFields.food.textContent = `${parts[3]} ${parts[4]}s`;
+      stateFields.motion.textContent = parts[5];
+    }
+
+    function handleNotification(event) {
+      const text = decoder.decode(event.target.value);
+      text.split(/\n/).forEach((line) => {
+        if (!line.trim()) {
+          return;
+        }
+        appendLog(`RX: ${line}`);
+        parseStateLine(line);
+      });
+    }
+
+    function handleDisconnect() {
+      rxCharacteristic = null;
+      txCharacteristic = null;
+      setControlsEnabled(false);
+      setStatus("已断开", "disconnected");
+      appendLog("BLE disconnected");
+    }
+
+    async function connectSmartPet() {
+      if (!navigator.bluetooth) {
+        supportNotice.classList.add("visible");
+        return;
+      }
+
+      try {
+        setStatus("正在连接", "connecting");
+        device = await navigator.bluetooth.requestDevice({
+          filters: [{ services: [SERVICE_UUID] }],
+          optionalServices: [SERVICE_UUID],
+        });
+        device.addEventListener("gattserverdisconnected", handleDisconnect);
+
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        rxCharacteristic = await service.getCharacteristic(RX_UUID);
+        txCharacteristic = await service.getCharacteristic(TX_UUID);
+        await txCharacteristic.startNotifications();
+        txCharacteristic.addEventListener("characteristicvaluechanged", handleNotification);
+
+        setControlsEnabled(true);
+        setStatus("已连接", "connected");
+        appendLog("BLE connected");
+      } catch (error) {
+        setControlsEnabled(false);
+        setStatus("未连接", "");
+        appendLog(`ERR: ${error.message || error}`);
+      }
+    }
+
+    async function sendCommand(cmd) {
+      if (!rxCharacteristic) {
+        appendLog("ERR: not connected");
+        return;
+      }
+
+      try {
+        const data = encoder.encode(`${cmd}\n`);
+        if (rxCharacteristic.writeValueWithoutResponse) {
+          await rxCharacteristic.writeValueWithoutResponse(data);
+        } else {
+          await rxCharacteristic.writeValue(data);
+        }
+        appendLog(`TX: ${cmd}`);
+      } catch (error) {
+        appendLog(`ERR: ${error.message || error}`);
+      }
+    }
+
+    connectButton.addEventListener("click", connectSmartPet);
+
+    commandButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        sendCommand(button.dataset.command);
+      });
+    });
+
+    emotionSlider.addEventListener("input", () => {
+      emotionValue.textContent = emotionSlider.value;
+    });
+
+    emotionButton.addEventListener("click", () => {
+      sendCommand(`setemo ${emotionSlider.value}`);
+    });
+
+    if (!navigator.bluetooth) {
+      supportNotice.classList.add("visible");
+    }
+    setControlsEnabled(false);
+  </script>
+</body>
+</html>
