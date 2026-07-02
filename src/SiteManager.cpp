@@ -101,10 +101,7 @@ void siteNotifyStateIfNeeded(const PetState &state,
   }
 
   const bool eventTriggered = events.count > 0;
-  if (!force && !eventTriggered && !timeReached(nowMs, gNextStatusMs))
-  {
-    return;
-  }
+  const bool periodic = timeReached(nowMs, gNextStatusMs);
 
   NetworkPetStatus status;
   status.power = state.power;
@@ -114,8 +111,11 @@ void siteNotifyStateIfNeeded(const PetState &state,
   status.remainSeconds = fullRemainSeconds(state);
   status.uptimeMs = nowMs;
   status.eventTriggered = eventTriggered;
-  status.force = force;
+  status.force = force || periodic;
   networkTaskSubmitStatus(status);
 
-  gNextStatusMs = nowMs + kSmartPetStatusIntervalMs;
+  if (status.force || eventTriggered)
+  {
+    gNextStatusMs = nowMs + kSmartPetStatusIntervalMs;
+  }
 }

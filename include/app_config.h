@@ -134,6 +134,10 @@
 #define SMARTPET_COMMAND_POLL_INTERVAL_MS 2000UL
 #endif
 
+#ifndef SMARTPET_SYNC_INTERVAL_MS
+#define SMARTPET_SYNC_INTERVAL_MS 2000UL
+#endif
+
 #ifndef SMARTPET_STATUS_INTERVAL_MS
 #define SMARTPET_STATUS_INTERVAL_MS 5000UL
 #endif
@@ -203,6 +207,7 @@ constexpr const char *kSmartPetApiBaseUrl = SMARTPET_API_BASE_URL;
 constexpr const char *kSmartPetApiToken = SMARTPET_API_TOKEN;
 constexpr const char *kSmartPetDefaultDevice = SMARTPET_DEFAULT_DEVICE;
 constexpr uint32_t kSmartPetCommandPollIntervalMs = SMARTPET_COMMAND_POLL_INTERVAL_MS;
+constexpr uint32_t kSmartPetSyncIntervalMs = SMARTPET_SYNC_INTERVAL_MS;
 constexpr uint32_t kSmartPetStatusIntervalMs = SMARTPET_STATUS_INTERVAL_MS;
 constexpr uint32_t kSmartPetHttpTimeoutMs = SMARTPET_HTTP_TIMEOUT_MS;
 constexpr uint32_t kSmartPetRetryMaxMs = SMARTPET_RETRY_MAX_MS;

@@ -27,6 +27,7 @@ namespace
   constexpr size_t kCommandQueueLength = 2;
   constexpr size_t kAckQueueLength = 2;
   constexpr size_t kStatusQueueLength = 1;
+  constexpr size_t kResponsePreviewLength = 80;
 
   constexpr const char *kWeatherApiUrl =
       "https://api.open-meteo.com/v1/forecast?latitude=39.9042&longitude=116.4074&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&timezone=Asia%2FShanghai";
@@ -45,21 +46,19 @@ namespace
 
   volatile bool gWebsiteModeEnabled = false;
   volatile bool gWifiConnected = false;
+  volatile uint32_t gNextSyncMs = 0;
 
   bool gWifiStarted = false;
   uint32_t gWifiStartAllowedMs = 0;
   uint32_t gNextWifiRetryMs = 0;
   uint32_t gNextWeatherFetchMs = 0;
-  uint32_t gNextCommandPollMs = 0;
   uint32_t gSiteRetryDelayMs = kInitialSiteRetryMs;
 
   bool gHasPendingAck = false;
   NetworkAckMessage gPendingAck;
-  uint32_t gNextAckMs = 0;
 
-  bool gHasPendingStatus = false;
-  NetworkPetStatus gPendingStatus;
-  uint32_t gNextStatusRetryMs = 0;
+  bool gHasLatestStatus = false;
+  NetworkPetStatus gLatestStatus;
 
   bool timeReached(uint32_t nowMs, uint32_t targetMs)
   {
@@ -89,6 +88,25 @@ namespace
     Serial.print(millis());
     Serial.print(F(" ms] "));
     Serial.println(message);
+  }
+
+  void printHttpIssue(const char *label, int code, const String &response)
+  {
+    Serial.print('[');
+    Serial.print(millis());
+    Serial.print(F(" ms] "));
+    Serial.print(label);
+    Serial.print(F(" HTTP "));
+    Serial.print(code);
+    if (response.length() > 0)
+    {
+      Serial.print(F(" body: "));
+      Serial.println(response.substring(0, kResponsePreviewLength));
+    }
+    else
+    {
+      Serial.println();
+    }
   }
 
   void resetSiteRetry()
@@ -186,40 +204,6 @@ namespace
     return true;
   }
 
-  bool postSiteJson(const String &url, const String &payload)
-  {
-    if (!wifiReady())
-    {
-      return false;
-    }
-
-    WiFiClientSecure client;
-    HTTPClient http;
-    if (!beginSiteHttp(http, client, url))
-    {
-      return false;
-    }
-
-    http.addHeader("Content-Type", "application/json");
-    const int code = http.POST(payload);
-    const String response = http.getString();
-    http.end();
-
-    if (code != HTTP_CODE_OK)
-    {
-      return false;
-    }
-
-    JsonDocument doc;
-    const DeserializationError error = deserializeJson(doc, response);
-    if (error)
-    {
-      return false;
-    }
-
-    return doc["ok"] | false;
-  }
-
   const char *powerText(PowerState power)
   {
     return power == PowerState::Sleeping ? "SLEEP" : "NORMAL";
@@ -230,152 +214,17 @@ namespace
     return food == FoodState::Full ? "FULL" : "HUNGRY";
   }
 
-  bool loadPendingAck()
+  void loadPendingAck()
   {
     if (gHasPendingAck || gAckQueue == nullptr)
     {
-      return gHasPendingAck;
+      return;
     }
 
-    if (xQueueReceive(gAckQueue, &gPendingAck, 0) != pdTRUE)
+    if (xQueueReceive(gAckQueue, &gPendingAck, 0) == pdTRUE)
     {
-      return false;
+      gHasPendingAck = true;
     }
-
-    gHasPendingAck = true;
-    gNextAckMs = millis();
-    return true;
-  }
-
-  bool sendAckNow(uint32_t nowMs)
-  {
-    JsonDocument doc;
-    doc["device"] = kSmartPetDefaultDevice;
-    doc["id"] = gPendingAck.id;
-    doc["command"] = gPendingAck.command;
-    doc["result"] = gPendingAck.result;
-
-    String payload;
-    serializeJson(doc, payload);
-
-    const bool ok = postSiteJson(siteEndpoint("/ack"), payload);
-    if (ok)
-    {
-      gHasPendingAck = false;
-      resetSiteRetry();
-    }
-    else
-    {
-      gNextAckMs = nowMs + nextSiteRetryDelay();
-    }
-
-    printNetworkLine(ok ? "Site ack sent" : "Site ack failed");
-    return ok;
-  }
-
-  bool processSiteAck(uint32_t nowMs)
-  {
-    if (!gWebsiteModeEnabled || !loadPendingAck())
-    {
-      return false;
-    }
-
-    if (!timeReached(nowMs, gNextAckMs))
-    {
-      return false;
-    }
-
-    sendAckNow(nowMs);
-    return true;
-  }
-
-  bool siteAckPending()
-  {
-    if (gHasPendingAck)
-    {
-      return true;
-    }
-
-    if (gAckQueue == nullptr)
-    {
-      return false;
-    }
-
-    return uxQueueMessagesWaiting(gAckQueue) > 0;
-  }
-
-  bool commandQueueHasRoom()
-  {
-    return gCommandQueue != nullptr && uxQueueSpacesAvailable(gCommandQueue) > 0;
-  }
-
-  bool fetchSiteCommand(uint32_t nowMs)
-  {
-    if (!gWebsiteModeEnabled || siteAckPending() || !commandQueueHasRoom())
-    {
-      return false;
-    }
-
-    if (!timeReached(nowMs, gNextCommandPollMs))
-    {
-      return false;
-    }
-
-    if (!wifiReady())
-    {
-      gNextCommandPollMs = nowMs + kSmartPetCommandPollIntervalMs;
-      return false;
-    }
-
-    String url = siteEndpoint("/command?device=");
-    url += kSmartPetDefaultDevice;
-
-    WiFiClientSecure client;
-    HTTPClient http;
-    if (!beginSiteHttp(http, client, url))
-    {
-      gNextCommandPollMs = nowMs + nextSiteRetryDelay();
-      return true;
-    }
-
-    const int code = http.GET();
-    const String response = http.getString();
-    http.end();
-
-    if (code != HTTP_CODE_OK)
-    {
-      gNextCommandPollMs = nowMs + nextSiteRetryDelay();
-      return true;
-    }
-
-    JsonDocument doc;
-    const DeserializationError error = deserializeJson(doc, response);
-    if (error || !(doc["ok"] | false))
-    {
-      gNextCommandPollMs = nowMs + nextSiteRetryDelay();
-      return true;
-    }
-
-    const char *command = doc["command"] | "";
-    resetSiteRetry();
-    gNextCommandPollMs = nowMs + kSmartPetCommandPollIntervalMs;
-    if (command[0] == '\0')
-    {
-      return true;
-    }
-
-    NetworkRemoteCommand message;
-    copyText(message.id, sizeof(message.id), doc["id"] | "");
-    copyText(message.command, sizeof(message.command), command);
-    if (xQueueSend(gCommandQueue, &message, 0) == pdTRUE)
-    {
-      printNetworkLine("Site command queued");
-    }
-    else
-    {
-      printNetworkLine("Site command queue full");
-    }
-    return true;
   }
 
   void drainLatestStatus()
@@ -388,55 +237,190 @@ namespace
     NetworkPetStatus status;
     while (xQueueReceive(gStatusQueue, &status, 0) == pdTRUE)
     {
-      gPendingStatus = status;
-      gHasPendingStatus = true;
+      gLatestStatus = status;
+      gHasLatestStatus = true;
     }
   }
 
-  bool sendStatusNow(uint32_t nowMs)
+  NetworkPetStatus latestStatusOrDefault(uint32_t nowMs)
   {
-    JsonDocument doc;
-    doc["device"] = kSmartPetDefaultDevice;
-    doc["mode"] = "website";
-    doc["power"] = powerText(gPendingStatus.power);
-    doc["emotion"] = gPendingStatus.emotion;
-    doc["food"] = foodText(gPendingStatus.food);
-    doc["remain"] = gPendingStatus.remainSeconds;
-    doc["motion"] = motionName(gPendingStatus.motion);
-    doc["uptime_ms"] = gPendingStatus.uptimeMs;
-
-    String payload;
-    serializeJson(doc, payload);
-
-    const bool ok = postSiteJson(siteEndpoint("/status"), payload);
-    if (ok)
+    if (gHasLatestStatus)
     {
-      gHasPendingStatus = false;
-      resetSiteRetry();
+      return gLatestStatus;
+    }
+
+    NetworkPetStatus status;
+    status.power = PowerState::Normal;
+    status.food = FoodState::Hungry;
+    status.motion = MotionMode::Null;
+    status.emotion = kEmotionInitial;
+    status.remainSeconds = 0;
+    status.uptimeMs = nowMs;
+    return status;
+  }
+
+  bool commandQueueHasRoom()
+  {
+    return gCommandQueue != nullptr && uxQueueSpacesAvailable(gCommandQueue) > 0;
+  }
+
+  bool queueCommand(const char *id, const char *command)
+  {
+    if (command == nullptr || command[0] == '\0')
+    {
+      return true;
+    }
+
+    if (!commandQueueHasRoom())
+    {
+      printNetworkLine("Site command queue full");
+      return true;
+    }
+
+    NetworkRemoteCommand message;
+    copyText(message.id, sizeof(message.id), id);
+    copyText(message.command, sizeof(message.command), command);
+    if (xQueueSend(gCommandQueue, &message, 0) == pdTRUE)
+    {
+      printNetworkLine("Site command queued");
+    }
+    return true;
+  }
+
+  bool queueCommandFromResponse(JsonDocument &doc)
+  {
+    JsonVariant commandValue = doc["command"];
+    if (commandValue.isNull())
+    {
+      return true;
+    }
+
+    if (commandValue.is<const char *>())
+    {
+      return queueCommand(doc["id"] | "", commandValue.as<const char *>());
+    }
+
+    const char *command = commandValue["text"] | "";
+    if (command[0] == '\0')
+    {
+      command = commandValue["command"] | "";
+    }
+
+    return queueCommand(commandValue["id"] | "", command);
+  }
+
+  bool handleSyncResponse(const String &response)
+  {
+    if (response.length() == 0)
+    {
+      return true;
+    }
+
+    JsonDocument doc;
+    const DeserializationError error = deserializeJson(doc, response);
+    if (error)
+    {
+      printNetworkLine("Site sync JSON parse failed");
+      return false;
+    }
+
+    JsonVariant okValue = doc["ok"];
+    if (!okValue.isNull() && !okValue.as<bool>())
+    {
+      printNetworkLine("Site sync rejected");
+      return false;
+    }
+
+    return queueCommandFromResponse(doc);
+  }
+
+  void fillSyncPayload(JsonDocument &doc, const NetworkPetStatus &status)
+  {
+    doc["device"] = kSmartPetDefaultDevice;
+    doc["heartbeat"] = true;
+    doc["mode"] = "website";
+    doc["uptime_ms"] = status.uptimeMs;
+
+    JsonObject statusObject = doc["status"].to<JsonObject>();
+    statusObject["power"] = powerText(status.power);
+    statusObject["emotion"] = status.emotion;
+    statusObject["food"] = foodText(status.food);
+    statusObject["remain"] = status.remainSeconds;
+    statusObject["motion"] = motionName(status.motion);
+
+    if (gHasPendingAck)
+    {
+      JsonObject ackObject = doc["ack"].to<JsonObject>();
+      ackObject["id"] = gPendingAck.id;
+      ackObject["command"] = gPendingAck.command;
+      ackObject["result"] = gPendingAck.result;
     }
     else
     {
-      gNextStatusRetryMs = nowMs + nextSiteRetryDelay();
+      doc["ack"] = nullptr;
     }
-
-    printNetworkLine(ok ? "Site status sent" : "Site status failed");
-    return ok;
   }
 
-  bool processSiteStatus(uint32_t nowMs)
+  bool sendSyncNow(uint32_t nowMs)
   {
-    if (!gWebsiteModeEnabled || siteAckPending())
+    if (!wifiReady())
     {
       return false;
     }
 
     drainLatestStatus();
-    if (!gHasPendingStatus || !timeReached(nowMs, gNextStatusRetryMs))
+    loadPendingAck();
+
+    JsonDocument doc;
+    fillSyncPayload(doc, latestStatusOrDefault(nowMs));
+
+    String payload;
+    serializeJson(doc, payload);
+
+    WiFiClientSecure client;
+    HTTPClient http;
+    if (!beginSiteHttp(http, client, siteEndpoint("/sync")))
+    {
+      printNetworkLine("Site sync begin failed");
+      return false;
+    }
+
+    http.addHeader("Content-Type", "application/json");
+    const int code = http.POST(payload);
+    const String response = http.getString();
+    http.end();
+
+    if (code < 200 || code >= 300)
+    {
+      printHttpIssue("Site sync failed", code, response);
+      return false;
+    }
+
+    if (!handleSyncResponse(response))
+    {
+      printHttpIssue("Site sync bad response", code, response);
+      return false;
+    }
+
+    if (gHasPendingAck)
+    {
+      gHasPendingAck = false;
+    }
+
+    resetSiteRetry();
+    printNetworkLine("Site sync sent");
+    return true;
+  }
+
+  bool processSiteSync(uint32_t nowMs)
+  {
+    if (!gWebsiteModeEnabled || !timeReached(nowMs, gNextSyncMs))
     {
       return false;
     }
 
-    sendStatusNow(nowMs);
+    const bool ok = sendSyncNow(nowMs);
+    gNextSyncMs = nowMs + (ok ? kSmartPetSyncIntervalMs : nextSiteRetryDelay());
     return true;
   }
 
@@ -558,15 +542,7 @@ namespace
 
       if (wifiReady())
       {
-        if (processSiteAck(nowMs))
-        {
-          didWork = true;
-        }
-        else if (fetchSiteCommand(nowMs))
-        {
-          didWork = true;
-        }
-        else if (processSiteStatus(nowMs))
+        if (processSiteSync(nowMs))
         {
           didWork = true;
         }
@@ -600,8 +576,7 @@ void networkTaskInit()
 
   gWifiStartAllowedMs = millis() + kWifiStartDelayMs;
   gNextWeatherFetchMs = 0;
-  gNextCommandPollMs = 0;
-  gNextStatusRetryMs = 0;
+  gNextSyncMs = 0;
   resetSiteRetry();
 
   const BaseType_t created = xTaskCreatePinnedToCore(networkTaskLoop,
@@ -629,13 +604,13 @@ void networkTaskSetWebsiteMode(bool enabled)
   }
 
   gWebsiteModeEnabled = enabled;
-  gNextCommandPollMs = millis();
-  gNextStatusRetryMs = 0;
+  gNextSyncMs = millis();
+  resetSiteRetry();
 
   if (!enabled)
   {
     gHasPendingAck = false;
-    gHasPendingStatus = false;
+    gHasLatestStatus = false;
     if (gCommandQueue != nullptr)
     {
       xQueueReset(gCommandQueue);
@@ -684,6 +659,8 @@ void networkTaskSubmitAck(const char *id, const char *command, const char *resul
   {
     printNetworkLine("Site ack queue full");
   }
+
+  gNextSyncMs = millis();
 }
 
 void networkTaskSubmitStatus(const NetworkPetStatus &status)
@@ -694,6 +671,10 @@ void networkTaskSubmitStatus(const NetworkPetStatus &status)
   }
 
   xQueueOverwrite(gStatusQueue, &status);
+  if (status.force || status.eventTriggered)
+  {
+    gNextSyncMs = millis();
+  }
 }
 
 bool networkTaskIsWifiConnected()
