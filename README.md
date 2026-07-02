@@ -1,42 +1,59 @@
-# ESP32-S3 Course Project
+# ESP32-S3 智能桌宠
 
-这是一个面向 ESP32-S3-WROOM-1 系列芯片的大作业协作仓库。当前阶段先完成工程、工具链和协作流程搭建；开发板到手后再补充实际引脚、Flash/PSRAM 型号、上传端口和外设模块。
+这是一个基于 PlatformIO + Arduino 的 ESP32-S3 智能桌宠工程。当前固件围绕一个稳定的状态机核心构建，外围功能通过硬件输入、串口命令、BLE 手机网页控制台、网站控制台和天气服务接入。
 
-## 当前基线
+## 当前功能
 
-- 构建工具：PlatformIO Core 6.1.19
-- 默认环境：`esp32-s3-devkitc-1`
-- 开发框架：Arduino for ESP32
-- 串口波特率：115200
-- 当前程序：串口启动自检、芯片信息输出、周期性 uptime/heap 状态输出
+- 桌宠状态机：心情、饥饿/吃饱、睡眠、动作和事件队列。
+- 真实硬件：OLED 显示、双舵机、摸头按钮、显示切换按钮、GPIO47 模式按钮、旋转编码器、光敏低光照睡眠输入。
+- 串口命令：`setemo`、`setful`、`setmot`、`setslp`/`setsleep`。
+- BLE 控制：ESP32-S3 作为 BLE Peripheral，手机网页通过 Web Bluetooth 发送文本命令。
+- 网站控制：GPIO47 切换到网站模式后关闭 BLE，通过 WiFi 与服务器 `/sync` 接口同步心跳、状态、ACK 和指令。
+- 天气显示：网络任务获取天气，天气页通过 OLED 显示缓存结果。
 
-`esp32-s3-devkitc-1` 是临时基线配置，适合先做无外设编译和基础串口程序。最终开发板如果是带 PSRAM、不同 Flash 容量或第三方板型，需要按实物修改 `platformio.ini`。
+## 运行模式
 
-## 常用命令
+开机默认模式是 `BLE + WEATHER`：BLE 控制台可用，同时 WiFi 网络任务负责天气缓存。
 
-PowerShell 中可以直接调用插件自带的 PlatformIO Core：
+按下 GPIO47 模式按钮后切换到 `WEBSITE + WIFI`：BLE 被关闭，网站控制启用。再次按下 GPIO47 会切回默认模式。切换时 OLED 会显示当前模式约 1 秒。
+
+## 构建
+
+PowerShell 中可直接运行：
 
 ```powershell
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" --version
 & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device list
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -t upload
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor
 ```
 
-也可以在 VS Code 里打开本文件夹，通过 PlatformIO 侧边栏执行 Build、Upload、Monitor。
+当前默认环境：
 
-## 协作流程
+```ini
+default_envs = course_s3_board
+```
 
-1. 需求和硬件变化写到 `docs/project-log.md`。
-2. 新增外设前先在 `docs/hardware-checklist.md` 记录型号、供电、电平、引脚和库依赖。
-3. 每完成一个小功能，先保证 `pio run` 通过，再提交代码。
-4. 板子到手后先只跑当前自检程序，确认串口输出稳定，再接外设。
+## 目录结构
 
-## 目录说明
+- `platformio.ini`：PlatformIO 环境、板卡、编译宏和依赖配置。
+- `include/app_config.h`：引脚、时间参数、WiFi、BLE 和网站 API 配置。
+- `include/app_types.h`：核心枚举和 `ParsedCommand`。
+- `include/pet_state.h` / `src/pet_state.cpp`：桌宠状态机核心。
+- `include/command_parser.h` / `src/command_parser.cpp`：串口、BLE、网站共用文本命令解析。
+- `include/hardware_io.h` / `src/hardware_io_real.cpp`：真实硬件适配层。
+- `include/BluetoothManager.h` / `src/BluetoothManager.cpp`：BLE GATT Server 和 Web Bluetooth 命令通道。
+- `include/WebsiteControl.h` / `src/WebsiteControl.cpp`：网站控制门面，连接主循环和网络任务。
+- `include/NetworkTask.h` / `src/NetworkTask.cpp`：WiFi、网站 `/sync`、天气 HTTP 和 FreeRTOS 网络任务。
+- `include/weather_service.h` / `src/weather_service.cpp`：天气缓存和 OLED 天气页数据填充。
+- `include/display_model.h` / `src/display_model.cpp`：OLED 三行显示模型。
+- `include/motion_plan.h` / `src/motion_plan.cpp`：动作到舵机角度曲线。
+- `include/debug_logger.h` / `src/debug_logger.cpp`：串口调试日志。
+- `include/extension_manager.h` / `src/extension_manager.cpp`：扩展钩子，目前负责天气页切换。
+- `web/index.html`：手机 Web Bluetooth 控制台。
+- `docs/`：项目日志、硬件清单、结构说明和报告素材。
 
-- `platformio.ini`：PlatformIO 环境、板卡和构建配置。
-- `include/app_config.h`：项目级常量。
-- `src/main.cpp`：当前固件入口。
-- `docs/`：项目日志、硬件检查清单和报告素材。
-- `test/`：后续放 PlatformIO 单元测试或板上验证说明。
+## 架构原则
+
+- `pet_state.cpp` 只处理桌宠状态机，不直接访问 BLE、WiFi、OLED 或舵机。
+- 所有外部控制最终转换成 `PetInput` 或 `ParsedCommand`，再交给 `petUpdate()`。
+- 主循环保持调度职责：读取输入、调用状态机、应用输出、提交远程状态。
+- 阻塞式 WiFi/HTTPS 请求放在 `NetworkTask` 中，不进入主循环。
+- BLE 回调只缓存短文本命令，不直接操作状态机、OLED 或舵机。

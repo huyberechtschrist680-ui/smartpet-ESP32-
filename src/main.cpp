@@ -1,7 +1,7 @@
 #include <Arduino.h>
 
 #include "BluetoothManager.h"
-#include "SiteManager.h"
+#include "WebsiteControl.h"
 #include "app_config.h"
 #include "command_parser.h"
 #include "debug_logger.h"
@@ -95,11 +95,11 @@ namespace
     if (controlMode == ControlMode::Website)
     {
       bluetoothSetEnabled(false);
-      siteSetEnabled(true);
+      websiteControlSetEnabled(true);
     }
     else
     {
-      siteSetEnabled(false);
+      websiteControlSetEnabled(false);
       bluetoothSetEnabled(true);
     }
 
@@ -243,7 +243,7 @@ void setup()
   debugInit();
   petInit(pet, millis());
   extensionInit();
-  siteInit();
+  websiteControlInit();
   bluetoothInit();
 }
 
@@ -256,16 +256,16 @@ void loop()
   const HardwareInput hardwareInput = hardwarePoll();
   PetInput input = makePetInput(hardwareInput, hasCommand, command);
   bool requestBleState = false;
-  bool requestSiteState = false;
-  bool forceSiteState = false;
-  String siteAckId;
-  String siteAckCommandText;
-  const char *siteAckResult = nullptr;
+  bool requestWebsiteState = false;
+  bool forceWebsiteState = false;
+  String websiteAckId;
+  String websiteAckCommandText;
+  const char *websiteAckResult = nullptr;
 
   if (hardwareInput.modeTogglePressed)
   {
     toggleControlMode(nowMs);
-    forceSiteState = controlMode == ControlMode::Website;
+    forceWebsiteState = controlMode == ControlMode::Website;
   }
 
   if (controlMode == ControlMode::BlePhone)
@@ -280,14 +280,14 @@ void loop()
   }
   else
   {
-    sitePoll(nowMs);
+    websiteControlPoll(nowMs);
 
-    SiteCommand siteCommand;
-    if (siteTakeCommand(siteCommand))
+    WebsiteCommand websiteCommand;
+    if (websiteControlTakeCommand(websiteCommand))
     {
-      siteAckId = siteCommand.id;
-      siteAckCommandText = siteCommand.command;
-      siteAckResult = handleRemoteCommand(siteCommand.command, input, requestSiteState, false);
+      websiteAckId = websiteCommand.id;
+      websiteAckCommandText = websiteCommand.command;
+      websiteAckResult = handleRemoteCommand(websiteCommand.command, input, requestWebsiteState, false);
     }
   }
 
@@ -305,14 +305,14 @@ void loop()
   debugLogStatusIfNeeded(nowMs, pet);
   extensionAfterPetUpdate(pet, events, nowMs);
 
-  if (siteAckResult != nullptr)
+  if (websiteAckResult != nullptr)
   {
-    siteAckCommand(siteAckId, siteAckCommandText, siteAckResult);
+    websiteControlAckCommand(websiteAckId, websiteAckCommandText, websiteAckResult);
   }
 
   if (controlMode == ControlMode::Website)
   {
-    siteNotifyStateIfNeeded(pet, events, nowMs, forceSiteState || requestSiteState);
+    websiteControlNotifyStateIfNeeded(pet, events, nowMs, forceWebsiteState || requestWebsiteState);
   }
 
   if (requestBleState)

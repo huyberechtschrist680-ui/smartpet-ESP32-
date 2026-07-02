@@ -17,7 +17,7 @@
 namespace
 {
   constexpr uint32_t kWifiRetryIntervalMs = 15000;
-  constexpr uint32_t kInitialSiteRetryMs = 2000;
+  constexpr uint32_t kInitialWebsiteRetryMs = 2000;
   constexpr uint32_t kWeatherHttpTimeoutMs = 1500;
   constexpr uint32_t kNetworkIdleDelayMs = 100;
   constexpr uint32_t kNetworkAfterWorkDelayMs = 50;
@@ -52,7 +52,7 @@ namespace
   uint32_t gWifiStartAllowedMs = 0;
   uint32_t gNextWifiRetryMs = 0;
   uint32_t gNextWeatherFetchMs = 0;
-  uint32_t gSiteRetryDelayMs = kInitialSiteRetryMs;
+  uint32_t gWebsiteRetryDelayMs = kInitialWebsiteRetryMs;
 
   bool gHasPendingAck = false;
   NetworkAckMessage gPendingAck;
@@ -109,15 +109,15 @@ namespace
     }
   }
 
-  void resetSiteRetry()
+  void resetWebsiteRetry()
   {
-    gSiteRetryDelayMs = kInitialSiteRetryMs;
+    gWebsiteRetryDelayMs = kInitialWebsiteRetryMs;
   }
 
-  uint32_t nextSiteRetryDelay()
+  uint32_t nextWebsiteRetryDelay()
   {
-    const uint32_t delayMs = gSiteRetryDelayMs;
-    gSiteRetryDelayMs = min(gSiteRetryDelayMs * 2, kSmartPetRetryMaxMs);
+    const uint32_t delayMs = gWebsiteRetryDelayMs;
+    gWebsiteRetryDelayMs = min(gWebsiteRetryDelayMs * 2, kSmartPetRetryMaxMs);
     return delayMs;
   }
 
@@ -161,7 +161,7 @@ namespace
     }
   }
 
-  String siteEndpoint(const char *path)
+  String websiteEndpoint(const char *path)
   {
     String url = kSmartPetApiBaseUrl;
     url += path;
@@ -193,7 +193,7 @@ namespace
     return http.begin(client, url);
   }
 
-  bool beginSiteHttp(HTTPClient &http, WiFiClientSecure &client, const String &url)
+  bool beginWebsiteHttp(HTTPClient &http, WiFiClientSecure &client, const String &url)
   {
     if (!beginSecureHttp(http, client, url, kSmartPetHttpTimeoutMs))
     {
@@ -273,7 +273,7 @@ namespace
 
     if (!commandQueueHasRoom())
     {
-      printNetworkLine("Site command queue full");
+      printNetworkLine("Website command queue full");
       return true;
     }
 
@@ -282,7 +282,7 @@ namespace
     copyText(message.command, sizeof(message.command), command);
     if (xQueueSend(gCommandQueue, &message, 0) == pdTRUE)
     {
-      printNetworkLine("Site command queued");
+      printNetworkLine("Website command queued");
     }
     return true;
   }
@@ -320,14 +320,14 @@ namespace
     const DeserializationError error = deserializeJson(doc, response);
     if (error)
     {
-      printNetworkLine("Site sync JSON parse failed");
+      printNetworkLine("Website sync JSON parse failed");
       return false;
     }
 
     JsonVariant okValue = doc["ok"];
     if (!okValue.isNull() && !okValue.as<bool>())
     {
-      printNetworkLine("Site sync rejected");
+      printNetworkLine("Website sync rejected");
       return false;
     }
 
@@ -379,9 +379,9 @@ namespace
 
     WiFiClientSecure client;
     HTTPClient http;
-    if (!beginSiteHttp(http, client, siteEndpoint("/sync")))
+    if (!beginWebsiteHttp(http, client, websiteEndpoint("/sync")))
     {
-      printNetworkLine("Site sync begin failed");
+      printNetworkLine("Website sync begin failed");
       return false;
     }
 
@@ -392,13 +392,13 @@ namespace
 
     if (code < 200 || code >= 300)
     {
-      printHttpIssue("Site sync failed", code, response);
+      printHttpIssue("Website sync failed", code, response);
       return false;
     }
 
     if (!handleSyncResponse(response))
     {
-      printHttpIssue("Site sync bad response", code, response);
+      printHttpIssue("Website sync bad response", code, response);
       return false;
     }
 
@@ -407,12 +407,12 @@ namespace
       gHasPendingAck = false;
     }
 
-    resetSiteRetry();
-    printNetworkLine("Site sync sent");
+    resetWebsiteRetry();
+    printNetworkLine("Website sync sent");
     return true;
   }
 
-  bool processSiteSync(uint32_t nowMs)
+  bool processWebsiteSync(uint32_t nowMs)
   {
     if (!gWebsiteModeEnabled || !timeReached(nowMs, gNextSyncMs))
     {
@@ -420,7 +420,7 @@ namespace
     }
 
     const bool ok = sendSyncNow(nowMs);
-    gNextSyncMs = nowMs + (ok ? kSmartPetSyncIntervalMs : nextSiteRetryDelay());
+    gNextSyncMs = nowMs + (ok ? kSmartPetSyncIntervalMs : nextWebsiteRetryDelay());
     return true;
   }
 
@@ -542,7 +542,7 @@ namespace
 
       if (wifiReady())
       {
-        if (processSiteSync(nowMs))
+        if (processWebsiteSync(nowMs))
         {
           didWork = true;
         }
@@ -577,7 +577,7 @@ void networkTaskInit()
   gWifiStartAllowedMs = millis() + kWifiStartDelayMs;
   gNextWeatherFetchMs = 0;
   gNextSyncMs = 0;
-  resetSiteRetry();
+  resetWebsiteRetry();
 
   const BaseType_t created = xTaskCreatePinnedToCore(networkTaskLoop,
                                                     "NetworkTask",
@@ -605,7 +605,7 @@ void networkTaskSetWebsiteMode(bool enabled)
 
   gWebsiteModeEnabled = enabled;
   gNextSyncMs = millis();
-  resetSiteRetry();
+  resetWebsiteRetry();
 
   if (!enabled)
   {
@@ -657,7 +657,7 @@ void networkTaskSubmitAck(const char *id, const char *command, const char *resul
 
   if (xQueueSend(gAckQueue, &message, 0) != pdTRUE)
   {
-    printNetworkLine("Site ack queue full");
+    printNetworkLine("Website ack queue full");
   }
 
   gNextSyncMs = millis();

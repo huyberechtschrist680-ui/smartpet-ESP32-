@@ -1,4 +1,4 @@
-﻿#include "SiteManager.h"
+#include "WebsiteControl.h"
 
 #include "NetworkTask.h"
 #include "app_config.h"
@@ -22,7 +22,7 @@ namespace
     return (state.fullEndActiveMs - state.activeMs) / 1000;
   }
 
-  void printSiteLine(const char *message)
+  void printWebsiteLine(const char *message)
   {
     Serial.print('[');
     Serial.print(millis());
@@ -32,14 +32,14 @@ namespace
 
 }  // namespace
 
-void siteInit()
+void websiteControlInit()
 {
   gEnabled = false;
   gNextStatusMs = 0;
   networkTaskInit();
 }
 
-void siteSetEnabled(bool enabled)
+void websiteControlSetEnabled(bool enabled)
 {
   if (enabled == gEnabled)
   {
@@ -49,20 +49,20 @@ void siteSetEnabled(bool enabled)
   gEnabled = enabled;
   gNextStatusMs = 0;
   networkTaskSetWebsiteMode(enabled);
-  printSiteLine(enabled ? "Site control enabled" : "Site control disabled");
+  printWebsiteLine(enabled ? "Website control enabled" : "Website control disabled");
 }
 
-bool siteIsEnabled()
+bool websiteControlIsEnabled()
 {
   return gEnabled;
 }
 
-void sitePoll(uint32_t nowMs)
+void websiteControlPoll(uint32_t nowMs)
 {
   (void)nowMs;
 }
 
-bool siteTakeCommand(SiteCommand &out)
+bool websiteControlTakeCommand(WebsiteCommand &out)
 {
   if (!gEnabled)
   {
@@ -80,7 +80,7 @@ bool siteTakeCommand(SiteCommand &out)
   return true;
 }
 
-void siteAckCommand(const String &id, const String &command, const char *result)
+void websiteControlAckCommand(const String &id, const String &command, const char *result)
 {
   if (!gEnabled || result == nullptr)
   {
@@ -90,10 +90,10 @@ void siteAckCommand(const String &id, const String &command, const char *result)
   networkTaskSubmitAck(id.c_str(), command.c_str(), result);
 }
 
-void siteNotifyStateIfNeeded(const PetState &state,
-                             const PetEventQueue &events,
-                             uint32_t nowMs,
-                             bool force)
+void websiteControlNotifyStateIfNeeded(const PetState &state,
+                                       const PetEventQueue &events,
+                                       uint32_t nowMs,
+                                       bool force)
 {
   if (!gEnabled)
   {
