@@ -32,7 +32,7 @@ enum class CommandType : uint8_t
   SetSleep,
 };
 
-enum class AppEventType : uint8_t
+enum class AppEventType : uint8_t // 通知事件类型
 {
   None,
   HeadTouch,

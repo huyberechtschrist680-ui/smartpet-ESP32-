@@ -10,11 +10,11 @@ struct PetState
   FoodState food = FoodState::Hungry;
   MotionMode motion = MotionMode::Null;
   int emotion = 5;
-  uint32_t lastUpdateRealMs = 0;
-  uint32_t activeMs = 0;
+  uint32_t lastUpdateRealMs = 0; // 上轮执行时间
+  uint32_t activeMs = 0;         // 清醒时间
   uint32_t lastEmotionDecayActiveMs = 0;
   uint32_t fullEndActiveMs = 0;
-  bool hasHeadTouchHistory = false;
+  bool hasHeadTouchHistory = false; // 解决开机真空期。
   uint32_t lastHeadTouchActiveMs = 0;
   bool lowLightOngoing = false;
   uint32_t lowLightStartRealMs = 0;
@@ -33,14 +33,14 @@ struct PetInput
   ParsedCommand command;
 };
 
-struct PetEvent
+struct PetEvent // 通知事件实例
 {
   AppEventType type = AppEventType::None;
   MotionMode motion = MotionMode::Null;
   int value = 0;
 };
 
-struct PetEventQueue
+struct PetEventQueue // 通知事件列表
 {
   static constexpr size_t kCapacity = 8;
 

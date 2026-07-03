@@ -34,20 +34,35 @@ namespace
   constexpr size_t kBleCommandLength = 80;
   constexpr uint16_t kNoConnectionId = 0xFFFF;
 
-  BLEServer *gServer = nullptr;
-  BLECharacteristic *gTxCharacteristic = nullptr;
-  volatile bool gEnabled = true;
-  volatile bool gInitRequested = false;
-  volatile bool gInitialized = false;
-  volatile bool gConnected = false;
-  volatile bool gAdvertising = false;
-  bool gAdvertisingConfigured = false;
-  volatile bool gConnectEvent = false;
-  volatile bool gDisconnectEvent = false;
-  volatile bool gPendingCommand = false;
-  uint32_t gInitAtMs = 0;
-  uint16_t gConnectionId = kNoConnectionId;
-  char gCommandBuffer[kBleCommandLength + 1] = "";
+  struct BleGattContext
+  {
+    BLEServer *server = nullptr;
+    BLECharacteristic *txCharacteristic = nullptr;
+    bool advertisingConfigured = false;
+  };
+
+  struct BleRuntimeState
+  {
+    volatile bool enabled = true;
+    volatile bool initRequested = false;
+    volatile bool initialized = false;
+    volatile bool connected = false;
+    volatile bool advertising = false;
+    volatile bool connectEvent = false;
+    volatile bool disconnectEvent = false;
+    uint32_t initAtMs = 0;
+    uint16_t connectionId = kNoConnectionId;
+  };
+
+  struct BleCommandMailbox
+  {
+    volatile bool pending = false;
+    char buffer[kBleCommandLength + 1] = "";
+  };
+
+  BleGattContext gGatt;
+  BleRuntimeState gState;
+  BleCommandMailbox gMailbox;
   portMUX_TYPE gCommandMux = portMUX_INITIALIZER_UNLOCKED;
 
   bool timeReached(uint32_t nowMs, uint32_t targetMs)
@@ -77,14 +92,6 @@ namespace
     return text;
   }
 
-  void clearPendingCommand()
-  {
-    portENTER_CRITICAL(&gCommandMux);
-    gCommandBuffer[0] = '\0';
-    gPendingCommand = false;
-    portEXIT_CRITICAL(&gCommandMux);
-  }
-
   void printBleLine(const char *message)
   {
     Serial.print('[');
@@ -93,24 +100,121 @@ namespace
     Serial.println(message);
   }
 
+  void resetConnectionState()
+  {
+    gState.connected = false;
+    gState.advertising = false;
+    gState.connectEvent = false;
+    gState.disconnectEvent = false;
+    gState.connectionId = kNoConnectionId;
+  }
+
+  void clearPendingCommand()
+  {
+    portENTER_CRITICAL(&gCommandMux);
+    gMailbox.buffer[0] = '\0';
+    gMailbox.pending = false;
+    portEXIT_CRITICAL(&gCommandMux);
+  }
+
+  void storePendingCommand(const char *text)
+  {
+    portENTER_CRITICAL(&gCommandMux);
+    strncpy(gMailbox.buffer, text, kBleCommandLength);
+    gMailbox.buffer[kBleCommandLength] = '\0';
+    gMailbox.pending = true;
+    portEXIT_CRITICAL(&gCommandMux);
+  }
+
+  bool takePendingCommand(char *out, size_t outLength)
+  {
+    bool hasCommand = false;
+
+    portENTER_CRITICAL(&gCommandMux);
+    if (gMailbox.pending)
+    {
+      strncpy(out, gMailbox.buffer, outLength - 1);
+      out[outLength - 1] = '\0';
+      gMailbox.pending = false;
+      hasCommand = true;
+    }
+    portEXIT_CRITICAL(&gCommandMux);
+
+    return hasCommand;
+  }
+
+  bool copyWrittenValueToText(BLECharacteristic *characteristic,
+                              char *out,
+                              size_t outLength)
+  {
+    if (characteristic == nullptr || outLength == 0)
+    {
+      return false;
+    }
+
+    const auto value = characteristic->getValue();
+    if (value.length() == 0)
+    {
+      out[0] = '\0';
+      return false;
+    }
+
+    size_t length = 0;
+    for (size_t index = 0; index < value.length() && length < outLength - 1; ++index)
+    {
+      const char c = static_cast<char>(value[index]);
+      if (c == '\r' || c == '\n')
+      {
+        continue;
+      }
+      out[length++] = c;
+    }
+    out[length] = '\0';
+
+    return length > 0;
+  }
+
+  void markConnected(uint16_t connectionId)
+  {
+    gState.connectionId = connectionId;
+    gState.connected = true;
+    gState.connectEvent = true;
+    gState.advertising = false;
+  }
+
+  void markDisconnected()
+  {
+    gState.connectionId = kNoConnectionId;
+    gState.connected = false;
+    gState.disconnectEvent = true;
+    gState.advertising = false;
+  }
+
+  void configureAdvertising(BLEAdvertising *advertising)
+  {
+    if (advertising == nullptr || gGatt.advertisingConfigured)
+    {
+      return;
+    }
+
+    advertising->addServiceUUID(kBleServiceUuid);
+    advertising->setScanResponse(false);
+    advertising->setMinPreferred(0x06);
+    advertising->setMinPreferred(0x12);
+    gGatt.advertisingConfigured = true;
+  }
+
   void startAdvertising()
   {
-    if (!gInitialized || !gEnabled)
+    if (!gState.initialized || !gState.enabled)
     {
       return;
     }
 
     BLEAdvertising *advertising = BLEDevice::getAdvertising();
-    if (!gAdvertisingConfigured)
-    {
-      advertising->addServiceUUID(kBleServiceUuid);
-      advertising->setScanResponse(false);
-      advertising->setMinPreferred(0x06);
-      advertising->setMinPreferred(0x12);
-      gAdvertisingConfigured = true;
-    }
+    configureAdvertising(advertising);
     BLEDevice::startAdvertising();
-    gAdvertising = true;
+    gState.advertising = true;
   }
 
   class ServerCallbacks : public BLEServerCallbacks
@@ -118,39 +222,27 @@ namespace
   public:
     void onConnect(BLEServer *server) override
     {
-      gServer = server;
-      gConnectionId = server != nullptr ? server->getConnId() : kNoConnectionId;
-      gConnected = true;
-      gConnectEvent = true;
-      gAdvertising = false;
+      gGatt.server = server;
+      markConnected(server != nullptr ? server->getConnId() : kNoConnectionId);
     }
 
     void onConnect(BLEServer *server, esp_ble_gatts_cb_param_t *param) override
     {
       (void)server;
-      gConnectionId = param != nullptr ? param->connect.conn_id : kNoConnectionId;
-      gConnected = true;
-      gConnectEvent = true;
-      gAdvertising = false;
+      markConnected(param != nullptr ? param->connect.conn_id : kNoConnectionId);
     }
 
     void onDisconnect(BLEServer *server) override
     {
       (void)server;
-      gConnectionId = kNoConnectionId;
-      gConnected = false;
-      gDisconnectEvent = true;
-      gAdvertising = false;
+      markDisconnected();
     }
 
     void onDisconnect(BLEServer *server, esp_ble_gatts_cb_param_t *param) override
     {
       (void)server;
       (void)param;
-      gConnectionId = kNoConnectionId;
-      gConnected = false;
-      gDisconnectEvent = true;
-      gAdvertising = false;
+      markDisconnected();
     }
   };
 
@@ -159,29 +251,16 @@ namespace
   public:
     void onWrite(BLECharacteristic *characteristic) override
     {
-      if (!gEnabled)
-      {
-        return;
-      }
-
-      const auto value = characteristic->getValue();
-      if (value.length() == 0)
+      if (!gState.enabled)
       {
         return;
       }
 
       char text[kBleCommandLength + 1];
-      size_t length = 0;
-      for (size_t index = 0; index < value.length() && length < kBleCommandLength; ++index)
+      if (!copyWrittenValueToText(characteristic, text, sizeof(text)))
       {
-        const char c = static_cast<char>(value[index]);
-        if (c == '\r' || c == '\n')
-        {
-          continue;
-        }
-        text[length++] = c;
+        return;
       }
-      text[length] = '\0';
 
       char *trimmed = trimText(text);
       if (*trimmed == '\0')
@@ -189,20 +268,43 @@ namespace
         return;
       }
 
-      portENTER_CRITICAL(&gCommandMux);
-      strncpy(gCommandBuffer, trimmed, kBleCommandLength);
-      gCommandBuffer[kBleCommandLength] = '\0';
-      gPendingCommand = true;
-      portEXIT_CRITICAL(&gCommandMux);
+      storePendingCommand(trimmed);
     }
   };
 
   ServerCallbacks gServerCallbacks;
   RxCallbacks gRxCallbacks;
 
+  void createGattServer()
+  {
+    gGatt.server = BLEDevice::createServer();
+    gGatt.server->setCallbacks(&gServerCallbacks);
+  }
+
+  BLEService *createSmartPetService()
+  {
+    return gGatt.server->createService(kBleServiceUuid);
+  }
+
+  void createTxCharacteristic(BLEService *service)
+  {
+    gGatt.txCharacteristic = service->createCharacteristic(
+        kBleTxUuid,
+        BLECharacteristic::PROPERTY_NOTIFY);
+    gGatt.txCharacteristic->addDescriptor(new BLE2902());
+  }
+
+  void createRxCharacteristic(BLEService *service)
+  {
+    BLECharacteristic *rxCharacteristic = service->createCharacteristic(
+        kBleRxUuid,
+        BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+    rxCharacteristic->setCallbacks(&gRxCallbacks);
+  }
+
   void initializeBluetoothNow()
   {
-    if (!gEnabled || gInitialized)
+    if (!gState.enabled || gState.initialized)
     {
       return;
     }
@@ -210,23 +312,13 @@ namespace
     BLEDevice::init(kBleDeviceName);
     BLEDevice::setPower(PET_BLE_POWER_LEVEL);
 
-    gServer = BLEDevice::createServer();
-    gServer->setCallbacks(&gServerCallbacks);
-
-    BLEService *service = gServer->createService(kBleServiceUuid);
-
-    gTxCharacteristic = service->createCharacteristic(
-        kBleTxUuid,
-        BLECharacteristic::PROPERTY_NOTIFY);
-    gTxCharacteristic->addDescriptor(new BLE2902());
-
-    BLECharacteristic *rxCharacteristic = service->createCharacteristic(
-        kBleRxUuid,
-        BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
-    rxCharacteristic->setCallbacks(&gRxCallbacks);
+    createGattServer();
+    BLEService *service = createSmartPetService();
+    createTxCharacteristic(service);
+    createRxCharacteristic(service);
 
     service->start();
-    gInitialized = true;
+    gState.initialized = true;
     startAdvertising();
 
     printBleLine("BLE SmartPet advertising");
@@ -234,43 +326,42 @@ namespace
     printBleLine("BLE app: enable TX Notify, write UTF-8 text to RX");
   }
 
+  void releaseGattContext()
+  {
+    gGatt.server = nullptr;
+    gGatt.txCharacteristic = nullptr;
+    gGatt.advertisingConfigured = false;
+  }
+
   void disableBluetoothNow()
   {
-    gInitRequested = false;
+    gState.initRequested = false;
     clearPendingCommand();
 
-    if (!gInitialized)
+    if (!gState.initialized)
     {
-      gConnected = false;
-      gAdvertising = false;
-      gConnectEvent = false;
-      gDisconnectEvent = false;
-      gConnectionId = kNoConnectionId;
+      resetConnectionState();
       return;
     }
 
-    if (gConnected && gTxCharacteristic != nullptr)
+    if (gState.connected && gGatt.txCharacteristic != nullptr)
     {
       bluetoothNotify("BLE disabled: website mode");
     }
 
-    if (gServer != nullptr && gConnected && gConnectionId != kNoConnectionId)
+    if (gGatt.server != nullptr &&
+        gState.connected &&
+        gState.connectionId != kNoConnectionId)
     {
-      gServer->disconnect(gConnectionId);
+      gGatt.server->disconnect(gState.connectionId);
     }
 
     BLEDevice::stopAdvertising();
     BLEDevice::deinit(false);
 
-    gServer = nullptr;
-    gTxCharacteristic = nullptr;
-    gInitialized = false;
-    gConnected = false;
-    gAdvertising = false;
-    gAdvertisingConfigured = false;
-    gConnectEvent = false;
-    gDisconnectEvent = false;
-    gConnectionId = kNoConnectionId;
+    releaseGattContext();
+    gState.initialized = false;
+    resetConnectionState();
     printBleLine("BLE disabled");
   }
 
@@ -278,13 +369,13 @@ namespace
 
 void bluetoothInit()
 {
-  if (!gEnabled || gInitRequested || gInitialized)
+  if (!gState.enabled || gState.initRequested || gState.initialized)
   {
     return;
   }
 
-  gInitRequested = true;
-  gInitAtMs = millis() + kBleStartDelayMs;
+  gState.initRequested = true;
+  gState.initAtMs = millis() + kBleStartDelayMs;
   if (kBleStartDelayMs == 0)
   {
     initializeBluetoothNow();
@@ -296,32 +387,32 @@ void bluetoothInit()
 
 void updateBluetooth()
 {
-  if (!gEnabled)
+  if (!gState.enabled)
   {
     return;
   }
 
-  if (!gInitialized)
+  if (!gState.initialized)
   {
-    if (gInitRequested && timeReached(millis(), gInitAtMs))
+    if (gState.initRequested && timeReached(millis(), gState.initAtMs))
     {
       initializeBluetoothNow();
     }
     return;
   }
 
-  if (gConnectEvent)
+  if (gState.connectEvent)
   {
-    gConnectEvent = false;
+    gState.connectEvent = false;
     printBleLine("BLE connected");
     bluetoothNotify("BLE connected: SmartPet");
   }
 
-  if (gDisconnectEvent)
+  if (gState.disconnectEvent)
   {
-    gDisconnectEvent = false;
+    gState.disconnectEvent = false;
     printBleLine("BLE disconnected");
-    if (!gAdvertising)
+    if (!gState.advertising)
     {
       startAdvertising();
       printBleLine("BLE advertising restarted");
@@ -331,12 +422,12 @@ void updateBluetooth()
 
 void bluetoothSetEnabled(bool enabled)
 {
-  if (enabled == gEnabled)
+  if (enabled == gState.enabled)
   {
     return;
   }
 
-  gEnabled = enabled;
+  gState.enabled = enabled;
   if (!enabled)
   {
     disableBluetoothNow();
@@ -348,30 +439,18 @@ void bluetoothSetEnabled(bool enabled)
 
 bool bluetoothIsEnabled()
 {
-  return gEnabled;
+  return gState.enabled;
 }
 
 bool bluetoothTakeCommand(String &out)
 {
-  if (!gEnabled || !gInitialized)
+  if (!gState.enabled || !gState.initialized)
   {
     return false;
   }
 
   char command[kBleCommandLength + 1];
-  bool hasCommand = false;
-
-  portENTER_CRITICAL(&gCommandMux);
-  if (gPendingCommand)
-  {
-    strncpy(command, gCommandBuffer, kBleCommandLength);
-    command[kBleCommandLength] = '\0';
-    gPendingCommand = false;
-    hasCommand = true;
-  }
-  portEXIT_CRITICAL(&gCommandMux);
-
-  if (!hasCommand)
+  if (!takePendingCommand(command, sizeof(command)))
   {
     return false;
   }
@@ -382,7 +461,10 @@ bool bluetoothTakeCommand(String &out)
 
 void bluetoothNotify(const String &message)
 {
-  if (!gEnabled || !gInitialized || !gConnected || gTxCharacteristic == nullptr)
+  if (!gState.enabled ||
+      !gState.initialized ||
+      !gState.connected ||
+      gGatt.txCharacteristic == nullptr)
   {
     return;
   }
@@ -393,13 +475,13 @@ void bluetoothNotify(const String &message)
     line += '\n';
   }
 
-  gTxCharacteristic->setValue(line.c_str());
-  gTxCharacteristic->notify();
+  gGatt.txCharacteristic->setValue(line.c_str());
+  gGatt.txCharacteristic->notify();
 }
 
 bool bluetoothIsConnected()
 {
-  return gEnabled && gConnected;
+  return gState.enabled && gState.connected;
 }
 
 #else

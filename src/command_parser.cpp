@@ -18,7 +18,7 @@ namespace
     out = ParsedCommand{};
   }
 
-  char *trim(char *text)
+  char *trim(char *text) // 整理字符串
   {
     while (*text != '\0' && isspace(static_cast<unsigned char>(*text)))
     {
@@ -81,7 +81,7 @@ namespace
 
     char *end = nullptr;
     const long parsed = strtol(text, &end, 10);
-    if (end == text || *end != '\0')
+    if (end == text || *end != '\0') // 检验是否失败
     {
       return false;
     }
@@ -159,7 +159,7 @@ namespace
     return false;
   }
 
-}  // namespace
+} // namespace
 
 bool commandParseText(const char *text, ParsedCommand &out)
 {

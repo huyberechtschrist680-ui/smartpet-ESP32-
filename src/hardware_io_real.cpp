@@ -42,7 +42,7 @@ namespace
   int encoderClockwiseTicks = 0;
   uint32_t lastEncoderMoveMs = 0;
 
-  bool pinEnabled(int pin)
+  bool pinEnabled(int pin) // 测试时使用以便保护未实际连接引脚，避免电平抖动。
   {
     return pin >= 0;
   }
@@ -65,7 +65,7 @@ namespace
     button.rawChangedMs = millis();
   }
 
-  bool readButtonPressedEvent(int pin, DebouncedButton &button, uint32_t nowMs)
+  bool readButtonPressedEvent(int pin, DebouncedButton &button, uint32_t nowMs) // 返回按下事件
   {
     if (!pinEnabled(pin))
     {
@@ -98,12 +98,24 @@ namespace
   void IRAM_ATTR handleEncoderChange()
   {
     static constexpr int8_t kTransitionTable[16] =
-    {
-      0, -1, 1, 0,
-      1, 0, 0, -1,
-      -1, 0, 0, 1,
-      0, 1, -1, 0,
-    };
+        {
+            0,
+            -1,
+            1,
+            0,
+            1,
+            0,
+            0,
+            -1,
+            -1,
+            0,
+            0,
+            1,
+            0,
+            1,
+            -1,
+            0,
+        };
 
     const uint8_t currentState = readEncoderState();
     const uint8_t transition = static_cast<uint8_t>((encoderLastState << 2) | currentState);
@@ -164,9 +176,9 @@ namespace
   bool displayChanged(const char *line1, const char *line2, const char *line3)
   {
     return oledBlank ||
-    strncmp(cachedLine1, line1 != nullptr ? line1 : "", kCachedLineLength) != 0 ||
-    strncmp(cachedLine2, line2 != nullptr ? line2 : "", kCachedLineLength) != 0 ||
-    strncmp(cachedLine3, line3 != nullptr ? line3 : "", kCachedLineLength) != 0;
+           strncmp(cachedLine1, line1 != nullptr ? line1 : "", kCachedLineLength) != 0 ||
+           strncmp(cachedLine2, line2 != nullptr ? line2 : "", kCachedLineLength) != 0 ||
+           strncmp(cachedLine3, line3 != nullptr ? line3 : "", kCachedLineLength) != 0;
   }
 
   void drawDisplayLines(const char *line1, const char *line2, const char *line3)
@@ -200,7 +212,7 @@ namespace
       return;
     }
 
-    Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
+    Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL); // 初始化总线
     Wire.setClock(400000);
     oledReady = oled.begin(SSD1306_SWITCHCAPVCC, kOledAddress);
     if (oledReady)
@@ -237,7 +249,7 @@ namespace
     return delta;
   }
 
-  bool readEncoderFeedGesture(uint32_t nowMs)
+  bool readEncoderFeedGesture(uint32_t nowMs) // 将编码器转化为实际喂食动作并排除问题情况
   {
     const int16_t delta = consumeEncoderDelta();
 
@@ -271,7 +283,7 @@ namespace
     return true;
   }
 
-}  // namespace
+} // namespace
 
 void hardwareInit()
 {

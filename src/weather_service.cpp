@@ -1,4 +1,8 @@
-﻿#include "weather_service.h"
+﻿/*
+这个文件曾被用于HTTP请求天气数据，
+但后来为防卡死，将HTTP单独放入一个线程，此文件遂被用来提供天气缓存与调用接口。
+*/
+#include "weather_service.h"
 
 #include "app_config.h"
 
@@ -38,7 +42,7 @@ namespace
     target[targetLength - 1] = '\0';
   }
 
-}  // namespace
+} // namespace
 
 void weatherInit()
 {

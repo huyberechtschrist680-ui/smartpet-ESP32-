@@ -131,7 +131,7 @@ namespace
     }
 
     while (pet.food == FoodState::Hungry &&
-    pet.activeMs - pet.lastEmotionDecayActiveMs >= kEmotionDecayIntervalMs)
+           pet.activeMs - pet.lastEmotionDecayActiveMs >= kEmotionDecayIntervalMs)
     {
       pet.lastEmotionDecayActiveMs += kEmotionDecayIntervalMs;
       pet.emotion = clampEmotion(pet.emotion - 1);
@@ -154,11 +154,11 @@ namespace
 
   void updateAutomaticMotion(PetState &pet, bool suppressAutoMotion, PetEventQueue &events)
   {
-    while (pet.activeMs - pet.lastAutoMotionCheckActiveMs >= kAutoMotionCheckIntervalMs)
+    while (pet.activeMs - pet.lastAutoMotionCheckActiveMs >= kAutoMotionCheckIntervalMs) // 补偿卡顿
     {
       pet.lastAutoMotionCheckActiveMs += kAutoMotionCheckIntervalMs;
 
-      if (suppressAutoMotion || pet.motion != MotionMode::Null)
+      if (suppressAutoMotion || pet.motion != MotionMode::Null) // 避免动作冲突
       {
         continue;
       }
@@ -170,7 +170,7 @@ namespace
     }
   }
 
-  void applyNormalCommand(PetState &pet, const ParsedCommand &command, PetEventQueue &events)
+  void applyNormalCommand(PetState &pet, const ParsedCommand &command, PetEventQueue &events) // 处理常态命令。
   {
     switch (command.type)
     {
@@ -205,7 +205,7 @@ namespace
   void handleHeadTouch(PetState &pet, PetEventQueue &events)
   {
     if (pet.hasHeadTouchHistory &&
-    pet.activeMs - pet.lastHeadTouchActiveMs < kHeadTouchCooldownMs)
+        pet.activeMs - pet.lastHeadTouchActiveMs < kHeadTouchCooldownMs)
     {
       return;
     }
@@ -217,7 +217,7 @@ namespace
     setMotion(pet, MotionMode::Play, &events);
   }
 
-}  // namespace
+} // namespace
 
 void PetEventQueue::clear()
 {
@@ -260,7 +260,7 @@ void petInit(PetState &pet, uint32_t nowMs)
 
 void petUpdate(PetState &pet, const PetInput &input, uint32_t nowMs, PetEventQueue &events)
 {
-  events.clear();
+  events.clear(); // 清空上轮事件队列。
 
   const uint32_t elapsedRealMs = nowMs - pet.lastUpdateRealMs;
   if (pet.power == PowerState::Normal)

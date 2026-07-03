@@ -1,3 +1,7 @@
+/*
+此文件在将联网功能扩充为可远程控制之后，曾作为HTTP请求的实现文件，
+但后来为防止HTTP请求卡死，将HTTP单独放入一个线程（在NetworkTask.cpp中实现），此文件遂成为main.cpp与NetworkTask.cpp之间的中间层。
+*/
 #include "WebsiteControl.h"
 
 #include "NetworkTask.h"
@@ -30,7 +34,7 @@ namespace
     Serial.println(message);
   }
 
-}  // namespace
+} // namespace
 
 void websiteControlInit()
 {

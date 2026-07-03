@@ -173,8 +173,8 @@ namespace
       requestState = true;
       return "OK";
     }
-
-    ParsedCommand remoteCommand;
+    // 以上为远程独有命令，以下为将远程命令合并入串口命令处理。
+    ParsedCommand remoteCommand; // 准备一个空命令容器
     if (!commandParseText(text.c_str(), remoteCommand))
     {
       if (notifyBleErrors)
@@ -184,7 +184,7 @@ namespace
       return "BAD_COMMAND";
     }
 
-    if (input.hasCommand)
+    if (input.hasCommand) // 优先处理串口命令
     {
       if (notifyBleErrors)
       {
@@ -233,7 +233,7 @@ namespace
     hardwareSetServoAngles(getServoAngles(state.motion, elapsedMotionMs));
   }
 
-}  // namespace
+} // namespace
 
 void setup()
 {
@@ -257,9 +257,9 @@ void loop()
   PetInput input = makePetInput(hardwareInput, hasCommand, command);
   bool requestBleState = false;
   bool requestWebsiteState = false;
-  bool forceWebsiteState = false;
+  bool forceWebsiteState = false; // 三个状态请求标志
   String websiteAckId;
-  String websiteAckCommandText;
+  String websiteAckCommandText; // 执行后回执
   const char *websiteAckResult = nullptr;
 
   if (hardwareInput.modeTogglePressed)
