@@ -12,6 +12,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
+#include <stdlib.h>
 #include <string.h>
 
 namespace
@@ -20,7 +21,6 @@ namespace
   // 主循环只通过队列提交状态、取网站命令和提交回执，避免直接等待网络。
   constexpr uint32_t kWifiRetryIntervalMs = 15000;
   constexpr uint32_t kInitialWebsiteRetryMs = 2000;
-  constexpr uint32_t kWeatherHttpTimeoutMs = 1500;
   constexpr uint32_t kNetworkIdleDelayMs = 100;
   constexpr uint32_t kNetworkAfterWorkDelayMs = 50;
   constexpr uint32_t kNetworkTaskStackWords = 16384;
@@ -31,8 +31,8 @@ namespace
   constexpr size_t kStatusQueueLength = 1;
   constexpr size_t kResponsePreviewLength = 80;
 
-  constexpr const char *kWeatherApiUrl =
-      "https://api.open-meteo.com/v1/forecast?latitude=39.9042&longitude=116.4074&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&timezone=Asia%2FShanghai";
+  constexpr const char *kAmapWeatherApiUrl =
+      "https://restapi.amap.com/v3/weather/weatherInfo";
 
   // 网站命令执行后的回执消息。
   struct NetworkAckMessage
@@ -173,6 +173,17 @@ namespace
   {
     String url = kSmartPetApiBaseUrl;
     url += path;
+    return url;
+  }
+
+  String weatherEndpoint()
+  {
+    String url = kAmapWeatherApiUrl;
+    url += "?city=";
+    url += kAmapWeatherCity;
+    url += "&key=";
+    url += kAmapWeatherKey;
+    url += "&extensions=base&output=JSON";
     return url;
   }
 
@@ -440,41 +451,135 @@ namespace
   }
 
   // Open-Meteo 的 weather_code 转成项目内部显示用的短文本。
-  const char *weatherCodeName(int code)
+  bool containsText(const char *text, const char *needle)
   {
-    if (code == 0)
+    return text != nullptr && strstr(text, needle) != nullptr;
+  }
+
+  const char *amapWeatherName(const char *weather)
+  {
+    if (weather == nullptr || weather[0] == '\0')
+    {
+      return "UNKNOWN";
+    }
+    if (containsText(weather, "\xE6\x99\xB4"))
     {
       return "CLEAR";
     }
-    if (code == 1 || code == 2)
-    {
-      return "PARTLY";
-    }
-    if (code == 3)
-    {
-      return "CLOUD";
-    }
-    if (code == 45 || code == 48)
-    {
-      return "FOG";
-    }
-    if (code >= 51 && code <= 57)
-    {
-      return "DRIZZLE";
-    }
-    if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82))
-    {
-      return "RAIN";
-    }
-    if ((code >= 71 && code <= 77) || code == 85 || code == 86)
-    {
-      return "SNOW";
-    }
-    if (code >= 95 && code <= 99)
+    if (containsText(weather, "\xE9\x9B\xB7"))
     {
       return "STORM";
     }
-    return "UNKNOWN";
+    if (containsText(weather, "\xE9\x9B\xA8"))
+    {
+      return "RAIN";
+    }
+    if (containsText(weather, "\xE9\x9B\xAA"))
+    {
+      return "SNOW";
+    }
+    if (containsText(weather, "\xE9\x9B\xBE") || containsText(weather, "\xE9\x9C\xBE"))
+    {
+      return "FOG";
+    }
+    if (containsText(weather, "\xE6\xB2\x99") || containsText(weather, "\xE5\xB0\x98"))
+    {
+      return "DUST";
+    }
+    if (containsText(weather, "\xE4\xBA\x91"))
+    {
+      return "CLOUD";
+    }
+    if (containsText(weather, "\xE9\x98\xB4"))
+    {
+      return "OVERCAST";
+    }
+    return "WEATHER";
+  }
+
+  const char *amapWindDirectionName(const char *direction)
+  {
+    if (direction == nullptr || direction[0] == '\0' || containsText(direction, "\xE6\x97\xA0"))
+    {
+      return "CALM";
+    }
+    if (containsText(direction, "\xE4\xB8\x9C\xE5\x8C\x97"))
+    {
+      return "NE";
+    }
+    if (containsText(direction, "\xE4\xB8\x9C\xE5\x8D\x97"))
+    {
+      return "SE";
+    }
+    if (containsText(direction, "\xE8\xA5\xBF\xE5\x8C\x97"))
+    {
+      return "NW";
+    }
+    if (containsText(direction, "\xE8\xA5\xBF\xE5\x8D\x97"))
+    {
+      return "SW";
+    }
+    if (containsText(direction, "\xE5\x8C\x97"))
+    {
+      return "N";
+    }
+    if (containsText(direction, "\xE5\x8D\x97"))
+    {
+      return "S";
+    }
+    if (containsText(direction, "\xE4\xB8\x9C"))
+    {
+      return "E";
+    }
+    if (containsText(direction, "\xE8\xA5\xBF"))
+    {
+      return "W";
+    }
+    return "VAR";
+  }
+  void extractWindLevel(char *target, size_t targetLength, const char *windPower)
+  {
+    if (targetLength == 0)
+    {
+      return;
+    }
+
+    size_t length = 0;
+    if (windPower != nullptr)
+    {
+      for (size_t index = 0; windPower[index] != '\0' && length + 1 < targetLength; ++index)
+      {
+        const char c = windPower[index];
+        if ((c >= '0' && c <= '9') || c == '-')
+        {
+          target[length++] = c;
+        }
+      }
+    }
+
+    if (length == 0)
+    {
+      target[length++] = 'N';
+      if (length + 1 < targetLength)
+      {
+        target[length++] = 'A';
+      }
+    }
+    target[length] = '\0';
+  }
+
+  void makeWindText(char *target,
+                    size_t targetLength,
+                    const char *direction,
+                    const char *windPower)
+  {
+    char level[8];
+    extractWindLevel(level, sizeof(level), windPower);
+    snprintf(target,
+             targetLength,
+             "WIND %s L%s",
+             amapWindDirectionName(direction),
+             level);
   }
 
   // 拉取天气数据并更新 weather_service；返回 true 表示本轮确实尝试了 HTTP 工作。
@@ -494,7 +599,7 @@ namespace
 
     WiFiClientSecure client;
     HTTPClient http;
-    if (!beginSecureHttp(http, client, kWeatherApiUrl, kWeatherHttpTimeoutMs))
+    if (!beginSecureHttp(http, client, weatherEndpoint(), kWeatherHttpTimeoutMs))
     {
       weatherSetNetworkStatus("HTTP BEGIN FAIL");
       gNextWeatherFetchMs = nowMs + kWeatherRetryIntervalMs;
@@ -524,23 +629,34 @@ namespace
       return true;
     }
 
-    JsonObject current = doc["current"];
-    if (current.isNull())
+    if (strcmp(doc["status"] | "", "1") != 0)
+    {
+      weatherSetNetworkStatus("API REJECTED");
+      gNextWeatherFetchMs = nowMs + kWeatherRetryIntervalMs;
+      return true;
+    }
+
+    JsonObject live = doc["lives"][0];
+    if (live.isNull())
     {
       weatherSetNetworkStatus("NO CURRENT DATA");
       gNextWeatherFetchMs = nowMs + kWeatherRetryIntervalMs;
       return true;
     }
 
-    const float temperatureC = current["temperature_2m"] | 0.0f;
-    const int humidityPercent = current["relative_humidity_2m"] | 0;
-    const float windKmh = current["wind_speed_10m"] | 0.0f;
-    const int weatherCode = current["weather_code"] | -1;
+    const float temperatureC = atof(live["temperature"] | "0");
+    const int humidityPercent = atoi(live["humidity"] | "0");
+    const char *weather = live["weather"] | "";
+    const char *windDirection = live["winddirection"] | "";
+    const char *windPower = live["windpower"] | "";
+
+    char windText[16];
+    makeWindText(windText, sizeof(windText), windDirection, windPower);
 
     weatherUpdateFromNetwork(temperatureC,
                              humidityPercent,
-                             windKmh,
-                             weatherCodeName(weatherCode),
+                             windText,
+                             amapWeatherName(weather),
                              nowMs);
     gNextWeatherFetchMs = nowMs + kWeatherFetchIntervalMs;
     return true;

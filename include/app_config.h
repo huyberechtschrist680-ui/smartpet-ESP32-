@@ -102,6 +102,18 @@
 #define PET_WEATHER_RETRY_INTERVAL_MS 60000UL
 #endif
 
+#ifndef PET_WEATHER_HTTP_TIMEOUT_MS
+#define PET_WEATHER_HTTP_TIMEOUT_MS 4000UL
+#endif
+
+#ifndef PET_AMAP_WEATHER_KEY
+#define PET_AMAP_WEATHER_KEY "5851e749b7fb44f44a2ce01716183ecd"
+#endif
+
+#ifndef PET_AMAP_WEATHER_CITY
+#define PET_AMAP_WEATHER_CITY "110000"
+#endif
+
 #ifndef PET_WIFI_START_DELAY_MS
 #define PET_WIFI_START_DELAY_MS 10000UL
 #endif
@@ -199,6 +211,9 @@ constexpr const char *kWifiPassword = PET_WIFI_PASSWORD;
 constexpr const char *kWeatherCityName = "Beijing";
 constexpr uint32_t kWeatherFetchIntervalMs = PET_WEATHER_FETCH_INTERVAL_MS;
 constexpr uint32_t kWeatherRetryIntervalMs = PET_WEATHER_RETRY_INTERVAL_MS;
+constexpr uint32_t kWeatherHttpTimeoutMs = PET_WEATHER_HTTP_TIMEOUT_MS;
+constexpr const char *kAmapWeatherKey = PET_AMAP_WEATHER_KEY;
+constexpr const char *kAmapWeatherCity = PET_AMAP_WEATHER_CITY;
 constexpr uint32_t kWifiStartDelayMs = PET_WIFI_START_DELAY_MS;
 constexpr int kWifiTxPowerQdbm = PET_WIFI_TX_POWER_QDBM;
 constexpr uint32_t kBleStartDelayMs = PET_BLE_START_DELAY_MS;

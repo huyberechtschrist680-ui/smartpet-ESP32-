@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <Arduino.h>
 
@@ -12,6 +12,6 @@ bool weatherFillDisplayModel(DisplayModel &model);
 void weatherSetNetworkStatus(const char *status);
 void weatherUpdateFromNetwork(float temperatureC,
                               int humidityPercent,
-                              float windKmh,
+                              const char *windText,
                               const char *condition,
                               uint32_t nowMs);

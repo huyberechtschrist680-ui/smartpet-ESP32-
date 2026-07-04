@@ -1,4 +1,4 @@
-﻿/*
+/*
 这个文件曾被用于HTTP请求天气数据，
 但后来为防卡死，将HTTP单独放入一个线程，此文件遂被用来提供天气缓存与调用接口。
 */
@@ -20,7 +20,7 @@ namespace
   uint32_t lastWeatherFetchMs = 0;
   float cachedTemperatureC = 0.0f;
   int cachedHumidityPercent = 0;
-  float cachedWindKmh = 0.0f;
+  char windText[kWeatherTextLength] = "WIND WAIT";
   char conditionText[kWeatherTextLength] = "WAIT";
   char statusText[kWeatherStatusLength] = "WIFI START";
   portMUX_TYPE weatherMux = portMUX_INITIALIZER_UNLOCKED;
@@ -52,7 +52,7 @@ void weatherInit()
   lastWeatherFetchMs = 0;
   cachedTemperatureC = 0.0f;
   cachedHumidityPercent = 0;
-  cachedWindKmh = 0.0f;
+  copyText(windText, sizeof(windText), "WIND WAIT");
   copyText(conditionText, sizeof(conditionText), "WAIT");
   copyText(statusText, sizeof(statusText), "WIFI WAIT");
   portEXIT_CRITICAL(&weatherMux);
@@ -85,7 +85,7 @@ bool weatherFillDisplayModel(DisplayModel &model)
   uint32_t localLastWeatherFetchMs = 0;
   float temperatureC = 0.0f;
   int humidityPercent = 0;
-  float windKmh = 0.0f;
+  char wind[kWeatherTextLength];
   char condition[kWeatherTextLength];
   char status[kWeatherStatusLength];
 
@@ -95,7 +95,7 @@ bool weatherFillDisplayModel(DisplayModel &model)
   localLastWeatherFetchMs = lastWeatherFetchMs;
   temperatureC = cachedTemperatureC;
   humidityPercent = cachedHumidityPercent;
-  windKmh = cachedWindKmh;
+  copyText(wind, sizeof(wind), windText);
   copyText(condition, sizeof(condition), conditionText);
   copyText(status, sizeof(status), statusText);
   portEXIT_CRITICAL(&weatherMux);
@@ -110,7 +110,7 @@ bool weatherFillDisplayModel(DisplayModel &model)
   {
     snprintf(model.line1, kDisplayLineLength, "%s %s", kWeatherCityName, condition);
     snprintf(model.line2, kDisplayLineLength, "T %.1fC H %d%%", temperatureC, humidityPercent);
-    snprintf(model.line3, kDisplayLineLength, "WIND %.1f km/h", windKmh);
+    snprintf(model.line3, kDisplayLineLength, "%s", wind);
     (void)localLastWeatherFetchMs;
     return true;
   }
@@ -130,16 +130,16 @@ void weatherSetNetworkStatus(const char *status)
 
 void weatherUpdateFromNetwork(float temperatureC,
                               int humidityPercent,
-                              float windKmh,
+                              const char *wind,
                               const char *condition,
                               uint32_t nowMs)
 {
   portENTER_CRITICAL(&weatherMux);
   cachedTemperatureC = temperatureC;
   cachedHumidityPercent = humidityPercent;
-  cachedWindKmh = windKmh;
   lastWeatherFetchMs = nowMs;
   hasWeather = true;
+  copyText(windText, sizeof(windText), wind);
   copyText(conditionText, sizeof(conditionText), condition);
   copyText(statusText, sizeof(statusText), "OK");
   portEXIT_CRITICAL(&weatherMux);
